@@ -1,7 +1,7 @@
 import sys
 sys.path.append('..')
-from LocalSensitiveHashing.lsh import LSH
-from LocalSensitiveHashing.uitls import generate_data
+from src.lsh import LSH
+from src.utils import generate_data
 import numpy as np
 from lshash.lshash import LSHash
 
@@ -20,6 +20,7 @@ if __name__ == '__main__':
     lsh.index(data)
 
     lsh_1 = LSHash(hash_size, dimension, num_tables)
+    # make the projection planes the same
     lsh_1.uniform_planes = lsh.projections
 
     for d in data:
