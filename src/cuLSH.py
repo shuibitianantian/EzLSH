@@ -1,10 +1,17 @@
 import cupy as cp
 from lsh import Table
 import numpy as np
-# import torch
-
 
 cp.random.seed(18)
+
+"""
+This is a simple implementation of random projection locality sensitive hashing using cupy
+
+References: 
+    https://github.com/kayzhu/LSHash
+    https://towardsdatascience.com/locality-sensitive-hashing-for-music-search-f2f1940ace23
+    
+"""
 
 
 def _hash(_inputs, projections, bits):
@@ -50,15 +57,7 @@ class CuLSH:
         if isinstance(self.bits, cp.ndarray):
             self.bits = cp.asnumpy(self.projections)
 
-    def index(self, inputs, device='gpu'):
-        """
-        Indexing a list of input points
-        :param inputs:
-        :param device:
-        :return:
-        """
-        # device = CuLSH.choose_device(inputs.shape)
-
+    def hash(self, inputs, device='cpu'):
         if device == 'gpu':
             self._move_to_cuda()
             gpu_inputs = cp.asarray(inputs)
@@ -69,10 +68,35 @@ class CuLSH:
         else:
             raise Exception("Can not decide which device to use")
 
-        flags = cp.asnumpy(flags)
-        # for i, b in enumerate(flags):
-        #     for j, v in enumerate(b):
-        #         self.hash_tables[i].storage.setdefault(v, []).append(inputs[j])
+        return cp.asnumpy(flags)
+
+    def index(self, inputs, device='cpu'):
+        """
+        Indexing a list of input points
+        :param inputs:
+        :param device:
+        :return:
+        """
+        flags = self.hash(inputs, device)
+
+        print(flags)
+        for i, b in enumerate(flags):
+            for j, v in enumerate(b):
+                self.hash_tables[i].storage.setdefault(v, []).append(inputs[j])
+
+    def query(self, inputs, device='cpu'):
+        flags = self.index(inputs, device)
+
+        # transpose flags, so the horizontal dimension is the number of hash tables,
+        # the vertical dimension is the number of queried data
+        flags = flags.T
+
+        for i, t in enumerate(flags): # i represents the index of data point
+            similar_data = []
+            for idx, hv in enumerate(t): # idx represents the index of hash table
+
+
+
 
 
 import sys
@@ -81,9 +105,9 @@ from src.utils import generate_data
 from lsh import LSH
 
 
-dimension = 500
-size = 600000
-hash_size = 4
+dimension = 100
+size = 5
+hash_size = 12
 num_tables = 4
 
 
