@@ -1,6 +1,6 @@
 import cupy as cp
-from lsh import Table
 import numpy as np
+import time
 
 cp.random.seed(18)
 
@@ -22,8 +22,25 @@ def _hash(_inputs, projections, bits):
     return h
 
 
+def load_data(file_name):
+    meta = file_name.split('/')[-1].split('_')
+    dim, s = meta[0], meta[1][:-4]
+    return int(dim), int(s), np.load(file_name)
+
+
+def cosine_dist(a, b):
+    return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
+
+
 class CuLSH:
     def __init__(self, hash_size, input_dim, num_tables):
+        """
+        initialize lsh
+        :param hash_size: hash space size
+        :param input_dim: input dimension
+        :param num_tables: number of tables (in order to maximize hash collision)
+        """
+        self.inputs = None
         self.hash_size = hash_size  # dimension after hashing
         self.input_dim = input_dim  # input dimension
         self.num_tables = num_tables  # number of tables, more tables means more hash collision
@@ -31,18 +48,11 @@ class CuLSH:
         self._init_storage()
         self._init_bit()
 
-    @staticmethod
-    def choose_device(shape):
-        if shape[0] * shape[1] > 100000:
-            return 'gpu'
-        else:
-            return 'cpu'
-
-    def _init_projections(self):
-        self.projections = np.random.randn(self.num_tables, self.hash_size, self.input_dim)
+    def _init_projections(self, sigma=2, mu=1):
+        self.projections = sigma * np.random.randn(self.num_tables, self.hash_size, self.input_dim) + mu
 
     def _init_storage(self):
-        self.hash_tables = [Table(i) for i in range(self.num_tables)]
+        self.hash_tables = [{} for _ in range(self.num_tables)]
 
     def _init_bit(self):
         self.bits = np.array(list(reversed([2**i for i in range(self.hash_size)])))
@@ -77,60 +87,61 @@ class CuLSH:
         :param device:
         :return:
         """
+        if self.inputs is not None:
+            cur_size = self.inputs.shape[0]
+            self.inputs = np.vstack((self.inputs, inputs))
+        else:
+            cur_size = 0
+            self.inputs = inputs
+
         flags = self.hash(inputs, device)
 
-        print(flags)
         for i, b in enumerate(flags):
             for j, v in enumerate(b):
-                self.hash_tables[i].storage.setdefault(v, []).append(inputs[j])
+                self.hash_tables[i].setdefault(v, []).append(int(cur_size + j))
 
-    def query(self, inputs, device='cpu'):
-        flags = self.index(inputs, device)
+    def query(self, inputs, k, device='cpu'):
+        flags = self.hash(inputs, device).T
 
         # transpose flags, so the horizontal dimension is the number of hash tables,
         # the vertical dimension is the number of queried data
-        flags = flags.T
 
-        for i, t in enumerate(flags): # i represents the index of data point
-            similar_data = []
-            for idx, hv in enumerate(t): # idx represents the index of hash table
+        results = np.empty((inputs.shape[0], k, self.input_dim), dtype=object)
 
+        for i, t in enumerate(flags):  # i represents the index of data point
+            similar_data = np.zeros(self.inputs.shape[0], dtype=bool)
+            for idx, hv in enumerate(t):  # idx represents the index of hash table
+                similar_data[np.asarray(self.hash_tables[idx].get(hv))] = True
 
+            similar_data = self.inputs[np.asarray(similar_data)]
 
+            similarities = similar_data.dot(inputs[i]) / (np.linalg.norm(similar_data) * np.linalg.norm(inputs[i]))
 
+            # in case of k larger than the size of similarities array
+            s = k if k < len(similar_data) else len(similar_data)
+            mx_args = np.argsort(similarities)[::-1][:s]
+            results[i, :] = self.inputs[mx_args]
 
-import sys
-sys.path.append('..')
-from src.utils import generate_data
-from lsh import LSH
+        return results
 
-
-dimension = 100
-size = 5
-hash_size = 12
-num_tables = 4
+    @property
+    def indexed_size(self):
+        return self.inputs.shape[0]
 
 
 if __name__ == '__main__':
-    data = generate_data(size, dimension)
 
-    import time
-    # =============
+    hash_size = 12
+    num_tables = 4
+
+    dimension, size, data = load_data('../data/100_500000.npy')
+    _, _, query_data = load_data('../data/100_500000.npy')
+
+    print("loading finished..")
+
     t = time.time()
     lsh = CuLSH(hash_size, dimension, num_tables)
-    lsh.index(data, 'cpu')
+    lsh.index(data, 'gpu')
+    # queried = lsh.query(data[:500], 2, 'cpu')
+
     print(time.time() - t)
-
-    # t = time.time()
-    # lsh_1 = LSH(hash_size, dimension, num_tables)
-    # lsh_1.projections = cp.asnumpy(lsh.projections)
-    # lsh_1.index(data)
-    # print(time.time() - t)
-
-    # for i in range(num_tables):
-    #     # t1 = lsh.hash_tables[i]
-    #     t2 = lsh_1.hash_tables[i]
-    #
-    #     for k in t2:
-    #         # assert len(t1[int(k, 2)]) == len(t2[k]) != 0
-    #         assert len(t1[k]) == len(t2[k])
