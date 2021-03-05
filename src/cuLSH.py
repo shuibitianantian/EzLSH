@@ -7,6 +7,14 @@ import numpy as np
 cp.random.seed(18)
 
 
+def _hash(_inputs, projections, bits):
+    xp = cp.get_array_module(_inputs)
+    signs = ~xp.signbit(xp.matmul(_inputs, projections))
+    h = xp.matmul(signs, bits)
+
+    return h
+
+
 class CuLSH:
     def __init__(self, hash_size, input_dim, num_tables):
         self.hash_size = hash_size  # dimension after hashing
@@ -32,15 +40,6 @@ class CuLSH:
     def _init_bit(self):
         self.bits = np.array(list(reversed([2**i for i in range(self.hash_size)])))
 
-    def _hash(self, _inputs):
-        xp = cp.get_array_module(_inputs)
-
-        projections = self.projections.transpose(0, 2, 1)
-        signs = ~xp.signbit(xp.matmul(_inputs, projections))
-        h = xp.matmul(signs, self.bits)
-
-        return h
-
     def _move_to_cuda(self):
         self.projections = cp.asarray(self.projections)
         self.bits = cp.asarray(self.bits)
@@ -63,10 +62,10 @@ class CuLSH:
         if device == 'gpu':
             self._move_to_cuda()
             gpu_inputs = cp.asarray(inputs)
-            flags = self._hash(gpu_inputs)
+            flags = _hash(gpu_inputs, self.projections.transpose(0, 2, 1), self.bits)
         elif device == 'cpu':
             self._move_to_cpu()
-            flags = self._hash(inputs)
+            flags = _hash(inputs, self.projections.transpose(0, 2, 1), self.bits)
         else:
             raise Exception("Can not decide which device to use")
 
@@ -82,9 +81,9 @@ from src.utils import generate_data
 from lsh import LSH
 
 
-dimension = 20
-size = 5000000
-hash_size = 8
+dimension = 500
+size = 600000
+hash_size = 4
 num_tables = 4
 
 
@@ -95,7 +94,7 @@ if __name__ == '__main__':
     # =============
     t = time.time()
     lsh = CuLSH(hash_size, dimension, num_tables)
-    lsh.index(data, 'gpu')
+    lsh.index(data, 'cpu')
     print(time.time() - t)
 
     # t = time.time()
